@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::boot::{align, PAGE_SIZE};
+use crate::boot::{PAGE_SIZE, align};
 use crate::error::{ExtractError, Result};
 
 pub const FDT_MAGIC: u32 = 0xD00D_FEED;

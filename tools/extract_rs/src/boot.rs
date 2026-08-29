@@ -279,16 +279,16 @@ impl BootImage {
             }
             let magic = u16::from_le_bytes(self.kernel[pos..pos + 2].try_into().unwrap());
             let version = self.kernel[pos + 2];
-            let hdr_len = u32::from_le_bytes(self.kernel[pos + 4..pos + 8].try_into().unwrap())
-                as usize;
-            let type_off = u32::from_le_bytes(self.kernel[pos + 8..pos + 12].try_into().unwrap())
-                as usize;
-            let type_len = u32::from_le_bytes(self.kernel[pos + 12..pos + 16].try_into().unwrap())
-                as usize;
-            let str_off = u32::from_le_bytes(self.kernel[pos + 16..pos + 20].try_into().unwrap())
-                as usize;
-            let str_len = u32::from_le_bytes(self.kernel[pos + 20..pos + 24].try_into().unwrap())
-                as usize;
+            let hdr_len =
+                u32::from_le_bytes(self.kernel[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            let type_off =
+                u32::from_le_bytes(self.kernel[pos + 8..pos + 12].try_into().unwrap()) as usize;
+            let type_len =
+                u32::from_le_bytes(self.kernel[pos + 12..pos + 16].try_into().unwrap()) as usize;
+            let str_off =
+                u32::from_le_bytes(self.kernel[pos + 16..pos + 20].try_into().unwrap()) as usize;
+            let str_len =
+                u32::from_le_bytes(self.kernel[pos + 20..pos + 24].try_into().unwrap()) as usize;
             if magic != BTF_MAGIC || version != 1 || hdr_len < 24 {
                 continue;
             }
