@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_XBL = 1003;
     private static final String PREFS = "ghostlock_prefs";
     private static final String PREF_CPU_PAIR = "cpu_pair";
-    private static final String[] KSU_MANAGER_PACKAGES = {"me.weishu.kernelsu", "com.resukisu.resukisu", "com.kowx712.supermanager",};
+    private static final String[] KSU_MANAGER_PACKAGES = {"me.weishu.kernelsu", "me.weishu.kernelsu.pr", "com.resukisu.resukisu", "com.kowx712.supermanager",};
     private static final int COLOR_RED = 0xFFFF6B6B;
     private static final int COLOR_GREEN = 0xFF5FD68A;
     private static final int COLOR_YELLOW = 0xFFFFC94D;
@@ -1333,7 +1333,7 @@ public class MainActivity extends Activity {
             }
         }
         if (!anyInstalled) {
-            appendLog("KernelSU/ReSukiSU/Kowsu app not installed");
+            appendLog("KernelSU/ReSukiSU/KowSU app not installed");
         }
         return null;
     }
