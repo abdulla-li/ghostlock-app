@@ -1164,9 +1164,9 @@ public class MainActivity extends Activity {
 
     /**
      * Map an extractor exit code to the user-facing failure message.
-     * 3: pselect route infeasible, 
-     * 4: missing required offsets, 
-     * 5: kallsyms recovery failure, 
+     * 3: pselect route infeasible,
+     * 4: missing required offsets,
+     * 5: kallsyms recovery failure,
      * 6: primitive already fixed,
      * -1 means the process was killed on timeout.
      */
@@ -1224,12 +1224,52 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Sales/market name of the device, matching the language of the current region.
+     * Market name, with a MANUFACTURER/BRAND/MODEL fallback.
      */
     private String resolveDeviceName() {
-        boolean cn = "CN".equalsIgnoreCase(Locale.getDefault().getCountry());
-        String marketName = firstValidProperty(cn ? "ro.vendor.oplus.market.name" : "ro.vendor.oplus.market.enname", cn ? "ro.vendor.oplus.market.enname" : "ro.vendor.oplus.market.name", "ro.product.marketname");
-        return marketName != null ? marketName : Build.MANUFACTURER + " " + Build.MODEL;
+        String manufacturer = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.toLowerCase(Locale.ROOT);
+        String marketName;
+        switch (manufacturer) {
+            case "xiaomi":
+                marketName = firstValidProperty("ro.product.marketname");
+                break;
+            case "oppo":
+            case "oneplus":
+            case "realme":
+            case "oplus": {
+                boolean cn = "CN".equalsIgnoreCase(Locale.getDefault().getCountry());
+                marketName = firstValidProperty(
+                        cn ? "ro.vendor.oplus.market.name" : "ro.vendor.oplus.market.enname",
+                        cn ? "ro.vendor.oplus.market.enname" : "ro.vendor.oplus.market.name");
+                break;
+            }
+            case "vivo":
+                marketName = firstValidProperty("ro.vivo.market.name");
+                break;
+            case "honor":
+            case "huawei":
+                marketName = firstValidProperty("ro.config.marketing_name");
+                break;
+            case "zte":
+            case "nubia":
+                marketName = firstValidProperty("ro.vendor.product.ztename");
+                break;
+            default:
+                marketName = null;
+                break;
+        }
+        if (marketName != null) {
+            return marketName;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (Build.MANUFACTURER != null) {
+            sb.append(Build.MANUFACTURER);
+        }
+        if (Build.BRAND != null && !Build.BRAND.equalsIgnoreCase(Build.MANUFACTURER)) {
+            sb.append(" ").append(Build.BRAND);
+        }
+        sb.append(" ").append(Build.MODEL);
+        return sb.toString();
     }
 
     private void startExploit() {
