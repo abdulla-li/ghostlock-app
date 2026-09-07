@@ -313,8 +313,8 @@ private fun GhostlockExecutionSheet(
     OverlayBottomSheet(
         show = state.executionSheetVisible,
         title = stringResource(R.string.log_title),
-        allowDismiss = false,
-        onDismissRequest = {},
+        allowDismiss = !state.running,
+        onDismissRequest = actions::onCloseExecutionSheet,
         startAction = {
             IconButton(onClick = actions::onCopyLogs) {
                 Icon(
