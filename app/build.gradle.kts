@@ -103,14 +103,15 @@ android {
     }
     val properties = Properties()
     runCatching { properties.load(project.rootProject.file("local.properties").inputStream()) }
-    val keystorePath = properties.getProperty("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_PATH")
+    val keystorePath = (properties.getProperty("KEYSTORE_PATH") ?: System.getenv("KEYSTORE_PATH"))?.trim()?.takeIf { it.isNotEmpty() }
     val keystorePwd = properties.getProperty("KEYSTORE_PASS") ?: System.getenv("KEYSTORE_PASS")
     val alias = properties.getProperty("KEY_ALIAS") ?: System.getenv("KEY_ALIAS")
     val pwd = properties.getProperty("KEY_PASSWORD") ?: System.getenv("KEY_PASSWORD")
-    if (keystorePath != null) {
+    val keystoreFile = keystorePath?.let(::file)?.takeIf { it.isFile && it.length() > 0L }
+    if (keystoreFile != null) {
         signingConfigs {
             create("release") {
-                storeFile = file(keystorePath)
+                storeFile = keystoreFile
                 storePassword = keystorePwd
                 keyAlias = alias
                 keyPassword = pwd
@@ -124,10 +125,10 @@ android {
             optimization.enable = true
             vcsInfo.include = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName(if (keystorePath != null) "release" else "debug")
+            signingConfig = signingConfigs.getByName(if (keystoreFile != null) "release" else "debug")
         }
         debug {
-            signingConfig = signingConfigs.getByName(if (keystorePath != null) "release" else "debug")
+            signingConfig = signingConfigs.getByName(if (keystoreFile != null) "release" else "debug")
         }
     }
     buildFeatures {
