@@ -12,7 +12,7 @@
     <string name="action_import_offsets">Import offsets.json</string>
     <string name="action_export_offsets">Export offsets.json</string>
     <string name="action_parse_ota">Parse OTA link</string>
-    <string name="action_parse">Parse image</string>
+    <string name="action_parse">Parse local image</string>
     <string name="import_success">Offsets imported</string>
     <string name="import_failed">Import failed</string>
     <string name="offsets_already_exist">Offsets already exist (built-in)</string>

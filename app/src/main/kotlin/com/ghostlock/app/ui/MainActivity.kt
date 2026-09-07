@@ -123,6 +123,8 @@ private fun GhostlockRoute(
             override fun onDialogConfirm(value: String) = viewModel.onDialogConfirm(value)
             override fun onDialogDismiss() = viewModel.onDialogDismiss()
             override fun onDialogDismissFinished() = viewModel.onDialogDismissFinished()
+            override fun onOverwriteConfirm() = viewModel.onOverwriteConfirm()
+            override fun onOverwriteDismiss() = viewModel.onOverwriteDismiss()
         },
     )
 }

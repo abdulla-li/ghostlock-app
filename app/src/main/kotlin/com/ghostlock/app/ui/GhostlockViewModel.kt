@@ -87,37 +87,32 @@ class GhostlockViewModel(
 
     fun onRun() {
         val snapshot = kernelSnapshot ?: return
-        if (!snapshot.kernelSupported) return
-        val pair = snapshot.cpuPairs.getOrNull(snapshot.selectedCpuPair) ?: return
-        if (running) return
-        running = true
-        mutableState.update {
-            it.copy(
-                running = true,
-                executionSheetVisible = true,
-            )
+        if (!snapshot.kernelSupported) {
+            if (beginOperation()) {
+                appendLog("result: exploit chain unsupported by this kernel")
+                endOperation()
+            }
+            return
         }
+        val pair = snapshot.cpuPairs.getOrNull(snapshot.selectedCpuPair) ?: return
+        if (!beginOperation()) return
         send(GhostlockEffect.KeepScreenAwake(true))
         appendLog("==== start ====")
         appendLog("cpu pair: ${snapshot.cpuPairLabels.getOrElse(snapshot.selectedCpuPair) { pair.toString() }}")
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val code = runExploitUseCase(pair, ::appendLog)
+                appendLog(if (code == 0) "result: exploit completed" else "result: exploit failed (exit code=$code)")
                 appendLog("exit code=$code")
             } finally {
-                running = false
-                mutableState.update {
-                    it.copy(
-                        running = false,
-                    )
-                }
+                endOperation()
                 send(GhostlockEffect.KeepScreenAwake(false))
             }
         }
     }
 
     fun onCloseExecutionSheet() {
-        if (running) return
+        if (running && !state.value.executionSheetDismissible) return
         mutableState.update { it.copy(executionSheetVisible = false) }
     }
 
@@ -205,7 +200,6 @@ class GhostlockViewModel(
         dismissDialog(clearConfirmation = false)
         when (dialogType) {
             DialogType.INPUT -> parseUrl(value)
-            DialogType.CONFIRM -> confirmPendingOperation()
             DialogType.NONE, DialogType.LIST -> Unit
         }
     }
@@ -243,6 +237,7 @@ class GhostlockViewModel(
     }
 
     private fun importDocument(uri: String) {
+        if (!beginOperation()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val json = readDocumentUseCase(uri)
@@ -251,7 +246,10 @@ class GhostlockViewModel(
                 throw error
             } catch (error: Exception) {
                 appendLog("import offsets failed: ${error.message}")
+                appendLog("result: import failed")
                 send(GhostlockEffect.Toast(R.string.import_failed))
+            } finally {
+                endOperation()
             }
         }
     }
@@ -266,12 +264,17 @@ class GhostlockViewModel(
             is OffsetImportResult.Imported -> {
                 refreshSnapshot()
                 appendLog("offsets.json imported: ${result.releases.joinToString()}")
+                appendLog("result: offsets imported successfully")
                 send(GhostlockEffect.Toast(R.string.import_success))
             }
 
-            OffsetImportResult.AlreadyPresent -> send(GhostlockEffect.Toast(R.string.offsets_already_exist))
+            OffsetImportResult.AlreadyPresent -> {
+                appendLog("result: offsets already present")
+                send(GhostlockEffect.Toast(R.string.offsets_already_exist))
+            }
             is OffsetImportResult.Failed -> {
                 appendLog("import offsets failed: ${result.reason}")
+                appendLog("result: import failed")
                 send(GhostlockEffect.Toast(R.string.import_failed))
             }
         }
@@ -299,6 +302,7 @@ class GhostlockViewModel(
                 throw error
             } catch (error: Exception) {
                 appendLog("parse error: ${error.message}")
+                appendLog("result: parse failed")
                 send(GhostlockEffect.Toast(R.string.parse_failed))
             }
         }
@@ -315,6 +319,7 @@ class GhostlockViewModel(
                 throw error
             } catch (error: Exception) {
                 appendLog("parse error: ${error.message}")
+                appendLog("result: parse failed")
                 send(GhostlockEffect.Toast(R.string.parse_failed))
             }
         }
@@ -324,6 +329,7 @@ class GhostlockViewModel(
         val url = value.trim()
         if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) {
             appendLog("error: invalid OTA URL: $url")
+            appendLog("result: parse failed")
             send(GhostlockEffect.Toast(R.string.parse_failed_url))
             return
         }
@@ -332,33 +338,72 @@ class GhostlockViewModel(
     }
 
     private suspend fun runParse(input: String, xblPath: String? = null, overwrite: Boolean = false) {
-        when (val result = parseSourceUseCase(input, xblPath, overwrite, ::appendLog)) {
-            is ParseResult.RequiresOverwrite -> {
-                pendingConfirmation = PendingConfirmation.Parse(input, xblPath)
-                showOverwriteDialog(result.releases)
-            }
+        if (!beginOperation()) return
+        try {
+            when (val result = parseSourceUseCase(input, xblPath, overwrite, ::appendLog)) {
+                is ParseResult.RequiresOverwrite -> {
+                    pendingConfirmation = PendingConfirmation.Parse(input, xblPath)
+                    showOverwriteDialog(result.releases)
+                }
 
-            is ParseResult.Parsed -> {
-                refreshSnapshot()
-                appendLog("offsets.json written: ${result.releases.joinToString()}")
-                send(GhostlockEffect.Toast(R.string.parse_success))
-            }
+                is ParseResult.Parsed -> {
+                    refreshSnapshot()
+                    appendLog("offsets.json written: ${result.releases.joinToString()}")
+                    appendLog("result: offsets parsed successfully")
+                    send(GhostlockEffect.Toast(R.string.parse_success))
+                }
 
-            ParseResult.AlreadyPresent -> send(GhostlockEffect.Toast(R.string.offsets_already_exist))
-            is ParseResult.Failed -> {
-                result.reason?.let { appendLog("parse failed: $it") }
-                send(GhostlockEffect.Toast(parseFailureToast(result.code)))
+                ParseResult.AlreadyPresent -> {
+                    appendLog("result: offsets already present")
+                    send(GhostlockEffect.Toast(R.string.offsets_already_exist))
+                }
+                is ParseResult.Failed -> {
+                    result.reason?.let { appendLog("parse failed: $it") }
+                    appendLog("result: ${parseFailureResult(result.code)}")
+                    send(GhostlockEffect.Toast(parseFailureToast(result.code)))
+                }
             }
+        } finally {
+            endOperation()
+        }
+    }
+
+    fun onOverwriteConfirm() {
+        mutableState.update { it.copy(overwriteDialogVisible = false, overwriteMessage = "") }
+        confirmPendingOperation()
+    }
+
+    fun onOverwriteDismiss() {
+        pendingConfirmation = null
+        running = false
+        appendLog("result: overwrite cancelled")
+        mutableState.update {
+            it.copy(
+                overwriteDialogVisible = false,
+                overwriteMessage = "",
+                running = false,
+                executionSheetDismissible = true,
+            )
         }
     }
 
     private fun confirmPendingOperation() {
         val confirmation = pendingConfirmation ?: return
         pendingConfirmation = null
-        viewModelScope.launch(Dispatchers.IO) {
-            when (confirmation) {
-                is PendingConfirmation.Import -> handleImportResult(importOffsetsUseCase.overwrite(confirmation.json), confirmation.json)
-                is PendingConfirmation.Parse -> runParse(confirmation.input, confirmation.xblPath, overwrite = true)
+        when (confirmation) {
+            is PendingConfirmation.Import -> {
+                if (!beginOperation()) return
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        handleImportResult(importOffsetsUseCase.overwrite(confirmation.json), confirmation.json)
+                    } finally {
+                        endOperation()
+                    }
+                }
+            }
+
+            is PendingConfirmation.Parse -> viewModelScope.launch(Dispatchers.IO) {
+                runParse(confirmation.input, confirmation.xblPath, overwrite = true)
             }
         }
     }
@@ -381,10 +426,8 @@ class GhostlockViewModel(
     private fun showOverwriteDialog(releases: List<String>) {
         mutableState.update {
             it.copy(
-                dialogVisible = true,
-                dialogType = DialogType.CONFIRM,
-                dialogTitleRes = R.string.overwrite_title,
-                dialogMessage = releases.joinToString("\n"),
+                overwriteDialogVisible = true,
+                overwriteMessage = releases.joinToString("\n"),
             )
         }
     }
@@ -420,6 +463,24 @@ class GhostlockViewModel(
         mutableState.update { it.copy(logLines = it.logLines + uiLine) }
     }
 
+    private fun beginOperation(): Boolean {
+        if (running) return false
+        running = true
+        mutableState.update {
+            it.copy(
+                running = true,
+                executionSheetVisible = true,
+                executionSheetDismissible = false,
+            )
+        }
+        return true
+    }
+
+    private fun endOperation() {
+        running = false
+        mutableState.update { it.copy(running = false, executionSheetDismissible = true) }
+    }
+
     private fun send(effect: GhostlockEffect) {
         effectChannel.trySend(effect)
     }
@@ -438,6 +499,14 @@ class GhostlockViewModel(
         6 -> R.string.parse_failed_fixed
         -1 -> R.string.parse_timeout
         else -> R.string.parse_failed
+    }
+
+    private fun parseFailureResult(code: Int): String = when (code) {
+        3, 4 -> "exploit chain unsupported by this kernel"
+        5 -> "kernel symbol table could not be recovered"
+        6 -> "kernel has fixed the vulnerability"
+        -1 -> "parse timed out"
+        else -> "parse failed"
     }
 
     private sealed interface PendingConfirmation {

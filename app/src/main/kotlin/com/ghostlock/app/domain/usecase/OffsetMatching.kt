@@ -4,15 +4,13 @@ import com.ghostlock.app.domain.model.KernelOffsets
 
 /** Compares imported offsets with the generated built-in kernel tables. */
 object OffsetMatching {
-    const val MtkDefaultPhysLoad = 0x80000000L
-
     fun matchesBuiltin(entry: KernelOffsets, builtins: Map<String, Map<String, Long>>): Boolean {
         val builtin = builtins[entry.release] ?: return false
         if (fieldDiffers(builtin, entry.scalars, "pselect_waiter_shift")) return false
         if (fieldDiffers(builtin, entry.scalars, "compact_waiter")) return false
         if (fieldDiffers(builtin, entry.scalars, "mm_struct_sz")) return false
         entry.scalars["kernel_phys_load"]?.let { phys ->
-            if (phys != MtkDefaultPhysLoad && fieldDiffers(builtin, entry.scalars, "kernel_phys_load")) {
+            if (phys != builtin["kernel_phys_load"]) {
                 return false
             }
         }

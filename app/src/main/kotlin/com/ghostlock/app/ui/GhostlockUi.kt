@@ -102,6 +102,7 @@ data class GhostlockUiState(
     val cpuPairIndex: Int = 0,
     val safeModeEnabled: Boolean = false,
     val executionSheetVisible: Boolean = false,
+    val executionSheetDismissible: Boolean = false,
     val dialogVisible: Boolean = false,
     val dialogType: DialogType = DialogType.NONE,
     val dialogTitleRes: Int = 0,
@@ -111,10 +112,12 @@ data class GhostlockUiState(
     val dialogItemResIds: List<Int> = emptyList(),
     val dialogCurrentItemIndex: Int = -1,
     val dialogInput: String = "",
+    val overwriteDialogVisible: Boolean = false,
+    val overwriteMessage: String = "",
     val logLines: List<GhostlockLogLine> = emptyList(),
 )
 
-enum class DialogType { NONE, LIST, INPUT, CONFIRM }
+enum class DialogType { NONE, LIST, INPUT }
 
 data class GhostlockLogLine(val text: String, val color: Int)
 
@@ -134,6 +137,8 @@ interface GhostlockActions {
     fun onDialogConfirm(value: String)
     fun onDialogDismiss()
     fun onDialogDismissFinished()
+    fun onOverwriteConfirm()
+    fun onOverwriteDismiss()
 }
 
 @Composable
@@ -187,6 +192,7 @@ internal fun GhostlockApp(
                 }
             }
             GhostlockDialog(state = state, actions = actions)
+            GhostlockOverwriteDialog(state = state, actions = actions)
             GhostlockExecutionSheet(state = state, actions = actions)
             GhostlockAboutDialog(
                 show = aboutVisible,
@@ -313,7 +319,7 @@ private fun GhostlockExecutionSheet(
     OverlayBottomSheet(
         show = state.executionSheetVisible,
         title = stringResource(R.string.log_title),
-        allowDismiss = !state.running,
+        allowDismiss = state.executionSheetDismissible,
         onDismissRequest = actions::onCloseExecutionSheet,
         startAction = {
             IconButton(onClick = actions::onCopyLogs) {
@@ -326,15 +332,12 @@ private fun GhostlockExecutionSheet(
         },
         endAction = {
             IconButton(
-                enabled = !state.running,
+                enabled = state.executionSheetDismissible,
                 onClick = actions::onCloseExecutionSheet,
             ) {
                 Icon(
                     imageVector = MiuixIcons.Close,
                     contentDescription = stringResource(R.string.action_close),
-                    tint = MiuixTheme.colorScheme.onBackground.copy(
-                        alpha = if (state.running) 0.38f else 1f,
-                    ),
                 )
             }
         },
@@ -358,11 +361,6 @@ private fun GhostlockDialog(
     OverlayDialog(
         show = state.dialogVisible,
         title = if (state.dialogType == DialogType.NONE) null else stringResource(state.dialogTitleRes),
-        summary = if (state.dialogType == DialogType.CONFIRM) {
-            stringResource(R.string.overwrite_message, state.dialogMessage)
-        } else {
-            null
-        },
         onDismissRequest = actions::onDialogDismiss,
         onDismissFinished = actions::onDialogDismissFinished,
         content = {
@@ -417,23 +415,36 @@ private fun GhostlockDialog(
                     }
                 }
 
-                DialogType.CONFIRM -> {
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        TextButton(
-                            modifier = Modifier.weight(1f),
-                            text = stringResource(R.string.cancel),
-                            onClick = actions::onDialogDismiss,
-                        )
-                        TextButton(
-                            modifier = Modifier.weight(1f),
-                            text = stringResource(R.string.overwrite_yes),
-                            colors = ButtonDefaults.textButtonColorsPrimary(),
-                            onClick = { actions.onDialogConfirm("") },
-                        )
-                    }
-                }
-
                 DialogType.NONE -> Unit
+            }
+        },
+    )
+}
+
+@Composable
+private fun GhostlockOverwriteDialog(
+    state: GhostlockUiState,
+    actions: GhostlockActions,
+) {
+    OverlayDialog(
+        show = state.overwriteDialogVisible,
+        title = stringResource(R.string.overwrite_title),
+        summary = stringResource(R.string.overwrite_message, state.overwriteMessage),
+        onDismissRequest = actions::onOverwriteDismiss,
+        content = {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                TextButton(
+                    modifier = Modifier.weight(1f),
+                    text = stringResource(R.string.cancel),
+                    onClick = actions::onOverwriteDismiss,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                TextButton(
+                    modifier = Modifier.weight(1f),
+                    text = stringResource(R.string.overwrite_yes),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    onClick = actions::onOverwriteConfirm,
+                )
             }
         },
     )

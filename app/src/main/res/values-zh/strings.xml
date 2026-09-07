@@ -12,7 +12,7 @@
     <string name="action_import_offsets">导入 offsets.json</string>
     <string name="action_export_offsets">导出 offsets.json</string>
     <string name="action_parse_ota">解析完整包链接</string>
-    <string name="action_parse">解析镜像</string>
+    <string name="action_parse">解析本地镜像</string>
     <string name="import_success">偏移已导入</string>
     <string name="import_failed">导入失败</string>
     <string name="offsets_already_exist">偏移已存在（内置）</string>
