@@ -987,6 +987,7 @@ int run_exploit(int argc, char **argv) {
   set_unbuffer();
   signal(SIGPIPE, SIG_IGN);
   set_limit();
+  reserve_standard_io();
   init_cpu_config();
   init_runtime_paths();
   write_root_script();

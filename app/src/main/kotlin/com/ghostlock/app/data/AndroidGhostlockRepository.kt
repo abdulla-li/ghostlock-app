@@ -217,11 +217,15 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             if (prepareKsud(workDir, onLog) != null) onLog("ksud ready") else onLog("warning: ksud not found")
             val ksuLog = File(workDir, KsuLogName)
             ksuLog.delete()
-            val offset = AtomicLong()
+            val nativeLog = File(workDir, ".ghostlock_native.log")
+            nativeLog.writeText("")
+            val ksuOffset = AtomicLong()
+            val nativeOffset = AtomicLong()
             val tailer = Thread {
                 try {
                     while (!Thread.currentThread().isInterrupted) {
-                        tailKsuLog(ksuLog, offset, onLog)
+                        tailKsuLog(nativeLog, nativeOffset, onLog)
+                        tailKsuLog(ksuLog, ksuOffset, onLog)
                         Thread.sleep(200)
                     }
                 } catch (_: InterruptedException) {
@@ -235,6 +239,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             val command = ProcessBuilder(binary.absolutePath)
                 .directory(workDir)
                 .redirectErrorStream(true)
+                .redirectOutput(nativeLog)
                 .apply {
                     environment()["GHOSTLOCK_HOME"] = workDir.absolutePath
                     environment()["TMPDIR"] = workDir.absolutePath
@@ -246,12 +251,13 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     if (safeModeEnabled) environment()["GHOSTLOCK_DISABLE_MODULES"] = "1"
                 }
             try {
-                runProcess(command, onLog = onLog)
+                runProcess(command, onLog = {}, captureOutput = false)
             } finally {
                 withContext(Dispatchers.IO) {
                     tailer.interrupt()
                     tailer.join(1000)
-                    tailKsuLog(ksuLog, offset, onLog)
+                    tailKsuLog(nativeLog, nativeOffset, onLog)
+                    tailKsuLog(ksuLog, ksuOffset, onLog)
                 }
             }
         } catch (error: CancellationException) {
@@ -482,31 +488,32 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         builder: ProcessBuilder,
         onLog: (String) -> Unit = {},
         timeoutSeconds: Long = 300,
+        captureOutput: Boolean = true,
     ): Int = runInterruptible {
         val process = builder.start()
         synchronized(processes) { processes += process }
-        val reader = Thread {
+        val reader = if (captureOutput) Thread {
             try {
                 process.inputStream.bufferedReader(StandardCharsets.UTF_8).useLines { lines -> lines.forEach(onLog) }
             } catch (_: IOException) { }
         }.apply {
             name = "process-output-reader"
             isDaemon = true
-        }
+        } else null
         try {
-            reader.start()
+            reader?.start()
             val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroy()
                 if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly()
             }
-            joinReader(reader)
+            reader?.let(::joinReader)
             if (finished) process.exitValue() else -1
         } finally {
             if (process.isAlive) process.destroyForcibly()
-            reader.interrupt()
+            reader?.interrupt()
             runCatching { process.inputStream.close() }
-            joinReader(reader)
+            reader?.let(::joinReader)
             synchronized(processes) { processes -= process }
         }
     }
