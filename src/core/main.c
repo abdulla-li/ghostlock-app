@@ -498,7 +498,7 @@ static void init_runtime_paths(void) {
 }
 
 static void write_root_script(void) {
-  char script[4096];
+  char script[8192];
   int sfd = open(g_root_script_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
   if (sfd < 0) {
     pr_warning("open root script failed path=%s errno=%d\n",
@@ -535,6 +535,13 @@ static void write_root_script(void) {
       "if [ \"$(id -u)\" -ne 0 ]; then\n"
       "  echo '[!] temp su unavailable; aborting' >>\"$LOG\"\n"
       "  exit 1\n"
+       "fi\n"
+       "if grep -q '^kernelsu[[:space:]]' /proc/modules 2>/dev/null; then\n"
+       "  echo \"[*] kernelsu already loaded; skipping policy restore and late-load\" >>\"$LOG\"\n"
+       "  echo '[+] KernelSU already loaded' >>\"$LOG\"\n"
+       "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
+       "  echo \"[*] restored SELinux enforcing\" >>\"$LOG\"\n"
+       "  exit 0\n"
       "fi\n"
       "KVER=$(uname -r | cut -d. -f1-2)\n"
       "AVER=$(uname -r | grep -o 'android[0-9]*' | head -1)\n"
@@ -1256,7 +1263,9 @@ int run_exploit(int argc, char **argv) {
     if (lf) {
       char line[256];
       while (fgets(line, sizeof(line), lf)) {
-        if (strstr(line, "[+] KernelSU module loaded")) ksu_log_loaded = 1;
+        if (strstr(line, "[+] KernelSU module loaded") ||
+            strstr(line, "[+] KernelSU already loaded"))
+          ksu_log_loaded = 1;
         if (strstr(line, "[!] KernelSU module not loaded")) ksu_log_failed = 1;
       }
       fclose(lf);
