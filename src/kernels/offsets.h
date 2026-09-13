@@ -25,7 +25,15 @@ struct kernel_offsets {
   /* mm_struct SLUB stride; 0 uses target.h default (6.6 GKI 0x500).
    * android14-6.1 uses 0x400 (BTF reports 0x3c0). */
   uint32_t mm_struct_sz;
-  uint32_t _pad[3];
+  uint32_t _pad[2];
+
+  /* Vivo vr.ko anti-root neutralization.
+   * Offset of __tracepoint_sys_exit from the kernel image base (_text).
+   * 0 = not a vivo device or vr.ko not present; neutralization is skipped.
+   * Confirmed from vr.ko disassembly: func1 (kill-enforcement kprobe) is
+   * registered on sys_exit; zeroing tp->funcs disables it globally.
+   * TRACEPOINT_FUNCS_OFF=0x40 (from vr_neutral.S, consistent across 6.1). */
+  uint64_t off_vr_sys_exit_tp;
 };
 
 #define OFFSETS_ENTRY(uname, ...) { .uname_r = uname, __VA_ARGS__ }
@@ -65,6 +73,7 @@ static const struct kernel_offsets known_offsets[] = {
 #include "6.1.138-android14-11-g44bda9e8f6e9-ab13792638/offsets.h"
 #include "6.1.145-android14-11-g09f1c0074ad7-ab14226177/offsets.h"
 #include "6.1.145-android14-11-g74d1702dab4d-ab14669069/offsets.h"
+#include "6.1.145-android14-11-geaa643a2c0ee-ab14763719/offsets.h"
 #include "6.1.162-android14-11-gce140c0e5bf5-ab15450923/offsets.h"
 #include "6.6.30-android15-8-g54dcbfbef792-ab12368803-4k/offsets.h"
 #include "6.6.77-android15-8-g4a507830d890-ab13636293-4k/offsets.h"

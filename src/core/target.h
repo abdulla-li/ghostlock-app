@@ -90,6 +90,10 @@
 #define TIF_SECCOMP_BIT 11
 #define PFA_NO_NEW_PRIVS_BIT 0
 
+/* offsetof(struct tracepoint, funcs) — confirmed 0x40 from vr_neutral.S
+ * analysis on android14-6.1 GKI. Used by neutralize_vr_global(). */
+#define TRACEPOINT_FUNCS_OFF 0x40
+
 #define STRUCT_PAGE_SIZE 0x40
 #define STRUCT_PAGE_COMPOUND_HEAD_OFF 0x08
 #define STRUCT_SLAB_CACHE_OFF 0x08

@@ -14,11 +14,20 @@ pub const SYMBOLS: &[(&str, &str)] = &[
     ("off_security_hook_heads", "security_hook_heads"),
     ("off_slide_nfulnl_logger", "nfulnl_logger"),
     ("off_slide_boot_id", "sysctl_bootid"),
+    // Vivo vr.ko anti-root neutralization: sys_exit enforcement probe target.
+    // Present on all GKI kernels; neutralization only runs when vr.ko is
+    // detected in /proc/modules at runtime, so non-vivo devices are unaffected.
+    ("off_vr_sys_exit_tp", "__tracepoint_sys_exit"),
 ];
 
 /// GKI kernels drop some data symbols; unresolved optionals emit 0 and the
 /// runtime falls back to target.h defaults.
-pub const OPTIONAL_SYMBOLS: &[&str] = &["off_security_hook_heads"];
+pub const OPTIONAL_SYMBOLS: &[&str] = &[
+    "off_security_hook_heads",
+    // __tracepoint_sys_exit may be absent on stripped/custom kernels;
+    // 0 disables vr.ko neutralization safely.
+    "off_vr_sys_exit_tp",
+];
 
 /// struct name -> (offset macro, BTF field)
 pub const STRUCT_FIELDS: &[(&str, &[(&str, &str)])] = &[
@@ -164,4 +173,80 @@ pub fn resolve_structs(btf: Option<&Btf>) -> ResolvedStructs {
     );
     result.insert("struct_mm_struct".to_string(), btf.size("mm_struct"));
     result
+}
+
+pub type ResolvedStructs2 = BTreeMap<String, Option<u32>>;
+
+pub fn optional_symbols() -> BTreeSet<&'static str> {
+    OPTIONAL_SYMBOLS.iter().copied().collect()
+}
+
+pub fn task_keys_list() -> &'static [&'static str] {
+    &[
+        "task_prio",
+        "task_normal_prio",
+        "task_sched_task_group",
+        "task_pi_lock",
+        "task_pi_waiters",
+        "task_pi_top_task",
+        "task_pi_blocked_on",
+        "task_pid",
+        "task_tgid",
+        "task_atomic_flags",
+        "task_real_cred",
+        "task_cred",
+        "task_comm",
+        "task_tasks",
+        "task_seccomp",
+    ]
+}
+
+pub fn struct_fields_reference()
+-> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
+    STRUCT_FIELDS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pselect_waiter_shift_for, render_c};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn render_c_carries_the_layout_selector_and_6_1_scalars() {
+        let symbols: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        let structs: BTreeMap<String, Option<u32>> = BTreeMap::new();
+        let out = render_c(
+            Some("6.1.118-android14-11-gca0ef6d17716-ab13624819"),
+            "x",
+            &symbols,
+            &structs,
+            None,
+            1,
+        );
+        assert!(out.contains("STRUCT_OFFSETS_6_1"));
+        assert!(out.contains(".compact_waiter=1"));
+        assert!(out.contains(".mm_struct_sz=0x400"));
+
+        let out66 = render_c(
+            Some("6.6.92-android15-8"),
+            "x",
+            &symbols,
+            &structs,
+            None,
+            -2,
+        );
+        assert!(out66.contains("STRUCT_OFFSETS_6_6"));
+        assert!(!out66.contains("compact_waiter"));
+    }
+
+    #[test]
+    fn pselect_waiter_shift_matches_the_committed_tables() {
+        assert_eq!(
+            pselect_waiter_shift_for(Some("6.1.118-android14-11-gca0ef6d17716-ab13624819")),
+            1
+        );
+        assert_eq!(pselect_waiter_shift_for(Some("6.6.92-android15-8")), -2);
+        assert_eq!(pselect_waiter_shift_for(Some("6.12.30-android16-0")), 0);
+        assert_eq!(pselect_waiter_shift_for(None), -2);
+    }
 }

