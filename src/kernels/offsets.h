@@ -30,9 +30,13 @@ struct kernel_offsets {
   /* Vivo vr.ko anti-root neutralization.
    * Offset of __tracepoint_sys_exit from the kernel image base (_text).
    * 0 = not a vivo device or vr.ko not present; neutralization is skipped.
-   * Confirmed from vr.ko disassembly: func1 (kill-enforcement kprobe) is
-   * registered on sys_exit; zeroing tp->funcs disables it globally.
-   * TRACEPOINT_FUNCS_OFF=0x40 (from vr_neutral.S, consistent across 6.1). */
+   * Confirmed from vr.ko disassembly: it registers a tracepoint probe on
+   * sys_exit (imports tracepoint_probe_register_prio and walks tp->funcs);
+   * zeroing tp->funcs disables it globally. vr.ko resolves symbols at
+   * runtime through vklp_get_addr + for_each_kernel_tracepoint, so it has
+   * no static __tracepoint_sys_exit relocation.
+   * NOTE: the funcs offset is NOT constant across KMIs (0x40 on 6.1,
+   * 0x48 on 6.6) and is selected at runtime by tracepoint_funcs_off(). */
   uint64_t off_vr_sys_exit_tp;
 };
 
@@ -73,7 +77,11 @@ static const struct kernel_offsets known_offsets[] = {
 #include "6.1.138-android14-11-g44bda9e8f6e9-ab13792638/offsets.h"
 #include "6.1.145-android14-11-g09f1c0074ad7-ab14226177/offsets.h"
 #include "6.1.145-android14-11-g74d1702dab4d-ab14669069/offsets.h"
+/* Present in some trees but not committed upstream; guard so a missing
+ * directory cannot break the build. */
+#if __has_include("6.1.145-android14-11-geaa643a2c0ee-ab14763719/offsets.h")
 #include "6.1.145-android14-11-geaa643a2c0ee-ab14763719/offsets.h"
+#endif
 #include "6.1.162-android14-11-gce140c0e5bf5-ab15450923/offsets.h"
 #include "6.6.30-android15-8-g54dcbfbef792-ab12368803-4k/offsets.h"
 #include "6.6.77-android15-8-g4a507830d890-ab13636293-4k/offsets.h"
@@ -85,6 +93,7 @@ static const struct kernel_offsets known_offsets[] = {
 #include "6.6.89-android15-8-g0889fe95bb10-ab14402178-4k/offsets.h"
 #include "6.6.89-android15-8-gb99b4586a3ee-ab13754593-4k/offsets.h"
 #include "6.6.89-android15-8-gf4dc45704e54-abogki446052083-4k/offsets.h"
+#include "6.6.89-android15-8-g97a9aaefab9a-ab14519050-4k/offsets.h"
 #include "6.6.92-android15-8-g3637f4904cf5-ab13944661-4k/offsets.h"
 #include "6.6.102-android15-8-gab8eb70a71b8-ab14350911-4k/offsets.h"
 #include "6.6.102-android15-8-gb01b41c2647c-ab15574720-4k/offsets.h"
